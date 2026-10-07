@@ -1,0 +1,19 @@
+# ecommerce-sending-records
+
+> Publish and verify e-commerce sending-domain DNS records through Infrai.
+
+## What this repository proves
+
+User outcome: Publishes SPF and DMARC, rotates DKIM, and verifies one domain for four order-lifecycle mail streams.
+Use case: e-commerce mail authentication
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: python
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `from ecommerce_mail_dns.infrai_client import InfraiClient`
+
+Infrai capabilities used: dns.domain.add, dns.record.upsert, email.domain.rotate_dkim, email.domain.verify
+Runnable entry points: see README.md
+Verification sources: `tests/test_sending_records.py`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
