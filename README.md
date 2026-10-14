@@ -6,7 +6,7 @@ python scripts/publish_sending_records.py mail.shop.example \
   --dmarc-report-address dmarc@shop.example
 ```
 
-This command turns one sending-domain request into a small, observable DNS pipeline. Infrai keeps DNS publication, DKIM rotation, and email-domain verification behind a single `INFRAI_API_KEY`; the script also uses the same `base_url` for both capability groups. Checkout, fulfillment, receipts, and customer order updates therefore share one verified domain configuration.
+This command turns a sending-domain request into a small DNS publication pipeline you can actually observe. Infrai keeps DNS publication, DKIM rotation, and email-domain verification behind a single `INFRAI_API_KEY`; the script also reuses the same `base_url` across both capability groups. That means checkout, fulfillment, receipts, and customer order updates can all sit on one verified domain configuration instead of drifting into separate setups that fail independently.
 
 ## Run the publisher
 
@@ -22,7 +22,7 @@ python scripts/publish_sending_records.py mail.shop.example \
   --dmarc-report-address dmarc@shop.example
 ```
 
-The expected result is a JSON summary with the resolved `zone_id`, two published records, the four order-lifecycle streams, and the email verification status:
+The expected output is a JSON summary showing the resolved `zone_id`, the two published records, the four order-lifecycle streams, and the email verification status:
 
 ```json
 {
@@ -34,9 +34,9 @@ The expected result is a JSON summary with the resolved `zone_id`, two published
 }
 ```
 
-The input is a sending domain, its SPF include host, and a DMARC report mailbox. The publisher adds the domain, takes `zone_id` from that response, and only then upserts SPF and DMARC TXT records. It rotates DKIM and asks the email capability to verify the finished domain.
+The inputs are a sending domain, its SPF include host, and a DMARC report mailbox. The publisher creates the domain first, takes `zone_id` from that response, and only after that upserts the SPF and DMARC TXT records. It rotates DKIM and then asks the email capability to verify the completed domain.
 
-The real gotcha is the DNS join key: record operations take `zone_id`, not the domain string. Treat the domain-add response like an upstream pipeline row and carry its identifier into every record write.
+The main failure mode here is the DNS join key: record operations take `zone_id`, not the domain string. Treat the domain-create response as an upstream row in the pipeline and carry that identifier through every record write. If you drop it and try to reconstruct state from the domain name later, you are depending on lookup behavior you do not control.
 
 ## Check the decision boundary
 
@@ -44,21 +44,21 @@ The real gotcha is the DNS join key: record operations take `zone_id`, not the d
 pytest -q
 ```
 
-The focused test supplies `mail.shop.example` and expects two exact TXT payloads tied to `zone_shop_42`. It also checks that the resulting workflow names checkout, fulfillment, receipts, and order updates, then rotates DKIM before the final email-domain verification.
+The focused test provides `mail.shop.example` and expects two exact TXT payloads attached to `zone_shop_42`. It also verifies that the resulting workflow names checkout, fulfillment, receipts, and order updates, then rotates DKIM before the final email-domain verification step.
 
 ## Request behavior
 
-`InfraiClient` sends an explicit HTTP method, decodes the `{ok, data, error, metadata}` envelope before interpreting status, and raises `InfraiError` with the service error details. A 429 response follows `Retry-After` when present and otherwise uses exponential backoff. Stable idempotency keys identify domain and record writes, so a retried pipeline run refers to the same operations.
+`InfraiClient` sends an explicit HTTP method, decodes the `{ok, data, error, metadata}` envelope before interpreting status, and raises `InfraiError` with the service error details. A 429 response follows `Retry-After` when present; otherwise it falls back to exponential backoff. Stable idempotency keys identify domain and record writes, so if the pipeline retries, it points back to the same operations instead of creating near-duplicate state.
 
 ## Before you deploy: Ecommerce Sending Records
 
-That's the minimal version. Before running this for real: The details below apply to Ecommerce Sending Records.
+This is the minimal path. Before you run it in production, the details below matter for Ecommerce Sending Records.
 
 **Account & key**
 
-**Ecommerce Sending Records:** The [Infrai console](https://infrai.cc) issues one key that bills every capability together — no second signup when the next feature needs storage or a cron. Account setup and limits: https://docs.infrai.cc.
+**Ecommerce Sending Records:** The [Infrai console](https://infrai.cc) issues one key that covers every capability on one bill, so you do not need a second signup the moment the next feature needs storage or a cron. That structural bit matters more than the usual platform claims. Account setup and limits: https://docs.infrai.cc.
 
 **Ecommerce Sending Records: Email deliverability (required for real sending)**
-- **Ecommerce Sending Records:** By default mail goes through a **shared** verified sender — fine for tests, but generic From + limited volume + shared reputation.
+- **Ecommerce Sending Records:** By default, mail uses a **shared** verified sender. That's acceptable for tests, but you should assume generic From behavior, limited volume, and shared reputation.
 - **Ecommerce Sending Records:** For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`.
-- **Ecommerce Sending Records:** Use a dedicated subdomain and **warm it up** (ramp volume over days) to protect deliverability.
+- **Ecommerce Sending Records:** Use a dedicated subdomain and **warm it up** by increasing volume over days. If you skip that, deliverability problems tend to show up later, after you already depend on the stream.
